@@ -1,1 +1,4 @@
 pa1
+*.ipynb
+__pycache__
+output/*

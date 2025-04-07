@@ -1,5 +1,6 @@
 import argparse
 import sys
+from Crawler import Crawler
 
 def parse_arguments():
     parser = argparse.ArgumentParser(prog='web-crawler')
@@ -28,3 +29,5 @@ if __name__ == '__main__':
         sys.exit(f"error: file {args.s} not found")
     
     #Call crawler
+    c = Crawler(seeds, 100, args.d)
+    c.crawl()
