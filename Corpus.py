@@ -8,7 +8,7 @@ class Corpus:
 
     Pages are split into separate files according to `pages_ratio`.
     Files are then stored as `"target_directory/base_name-xxxx"`"""
-    def __init__(self, target_directory: str, base_name ='pages-', pages_ratio=1000):
+    def __init__(self, target_directory: str, base_name ='pages', pages_ratio=1000):
         
         self.target_directory = target_directory
         self.base_name = base_name
@@ -18,7 +18,7 @@ class Corpus:
         
         self.file_num = 1
         self.count = 0
-        self.cur_file = open(f"{self.target_directory}/{self.base_name}-{self.file_num}.warc", 'wb')
+        self.cur_file = open(f"{self.target_directory}/{self.base_name}-{self.file_num}.gz", 'wb')
         self.writer = WARCWriter(self.cur_file, gzip=True)
     
     def next_file(self):
