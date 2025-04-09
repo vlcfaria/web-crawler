@@ -29,5 +29,5 @@ if __name__ == '__main__':
         sys.exit(f"error: file {args.s} not found")
     
     #Call crawler
-    c = Crawler(seeds, 100, args.d)
+    c = Crawler(seeds, args.n, args.d)
     c.crawl()

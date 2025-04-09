@@ -50,4 +50,5 @@ class Corpus:
         self.count += 1
     
     def close(self):
-        self.cur_file.close()
+        if not self.cur_file.closed:
+            self.cur_file.close()

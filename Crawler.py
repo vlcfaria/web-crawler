@@ -17,6 +17,8 @@ class Crawler:
         self.verbose = verbose
         self.corpus = Corpus("./output")
 
+        self.crawled = 0
+
         for s in seeds:
             s = url_normalize(s) #Basic normalization
             self.frontier.put(s)
@@ -24,13 +26,24 @@ class Crawler:
     
     def crawl(self):
         #TODO abide to robots.txt, expand frontier, paralellize, etc
-        while not self.frontier.empty():
+        while not self.frontier.empty() and self.crawled < self.to_crawl:
 
             url = self.frontier.get()
-            res = requests.get(url, stream=False)
 
-            #Response must be OK or similar HTTP response
-            if res.status_code // 100 != 2:
+            try:
+                res = requests.get(url, stream=False)
+                res.raise_for_status()
+            except requests.exceptions.SSLError:
+                print(f'error: ssl error on {url}')
+                continue #TODO try adding back to frontier with HTTP
+            except requests.exceptions.ConnectionError:
+                print('error: ConnectionError, no internet?')
+                continue
+            except requests.exceptions.Timeout:
+                print(f'error: timeout on {url}')
+                continue #TODO maybe setup a retry
+            except requests.exceptions.HTTPError as err:
+                print(f'error: httpError on {url}')
                 continue
 
             #MIME type must also be html
@@ -38,7 +51,9 @@ class Crawler:
             if not mime.startswith('text/html'): continue
 
             #All ok!
+            self.crawled += 1
             soup = BeautifulSoup(res.text, 'html.parser')
+            print(self.crawled)
 
             #Store in corpus + print
             self.corpus.write(url, res)
@@ -46,22 +61,28 @@ class Crawler:
             if self.verbose:
                 self.print_request(res.url, soup)
             
-            #Expand queue by finding links
-            for tag in soup.find_all('a'):
-                link = tag.get('href')
-
-                #Skip empty, missing href or hash
-                if link is None or link == '' or link[0] == '#': continue
-
-                try: #TODO remove hashes # in links too
-                    normal = url_normalize(link, default_domain=url, filter_params=True)
-                except: #Couldnt parse url, maybe not an URL? TODO check correctness
-                    continue
-                if normal not in self.visited: #Not yet visited, add to frontier
-                    self.frontier.put(normal)
-                    self.visited.add(normal)
+            self.process_outlinks(url, soup)
 
         self.corpus.close()
+    
+    def process_outlinks(self, url, soup):
+        #Expand queue by finding links
+        for tag in soup.find_all('a'):
+            link = tag.get('href')
+
+            #Skip empty/missing href and hashes
+            if link is None or link == '' or link[0] == '#': continue
+
+            try:
+                normal = url_normalize(link, default_domain=url, filter_params=True)
+                normal = normal.split('#', 1)[0] #Remove hashes # in links too
+
+            except: #Couldnt parse url, maybe not an URL? TODO check correctness
+                continue
+
+            if normal not in self.visited: #Not yet visited, add to frontier
+                self.frontier.put(normal)
+                self.visited.add(normal)
 
     def print_request(self, url, soup):
         #Get first 20 words. Very inefficient, but ok due to debugging only
