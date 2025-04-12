@@ -2,13 +2,14 @@ import sys
 from warcio.warcwriter import WARCWriter
 from warcio.statusandheaders import StatusAndHeaders
 from io import BytesIO
+import requests
 
 class Corpus:
-    """Class responsible for writing WARC format entries, given request response, storing into a Corpus.
+    """Class responsible for writing WARC format entries, given request response, storing into local storage.
 
     Pages are split into separate files according to `pages_ratio`.
-    Files are then stored as `"target_directory/base_name-xxxx"`"""
-    def __init__(self, target_directory: str, base_name ='pages', pages_ratio=1000):
+    Files are then stored as `"target_directory/base_name-xxxx.gz"`"""
+    def __init__(self, target_directory: str, base_name='pages', pages_ratio=1000):
         
         self.target_directory = target_directory
         self.base_name = base_name
@@ -21,7 +22,7 @@ class Corpus:
         self.cur_file = open(f"{self.target_directory}/{self.base_name}-{self.file_num}.gz", 'wb')
         self.writer = WARCWriter(self.cur_file, gzip=True)
     
-    def next_file(self):
+    def _next_file(self) -> None:
         'Closes current file, increments file counter and opens new .warc file for future writing'
         self.cur_file.close()
         self.count = 0
@@ -31,11 +32,11 @@ class Corpus:
         self.cur_file = open(f"{self.target_directory}/{self.base_name}-{self.file_num}.warc", 'wb')
         self.writer = WARCWriter(self.cur_file, gzip=True)
     
-    def write(self, url, resp):
+    def write(self, url: str, resp: requests.Response) -> None:
         'Takes in raw response content and append to current file, swapping if necessary'
         #Get next file if needed
         if self.count == self.pages_ratio:
-            self.next_file()
+            self._next_file()
         
         #Create record
         headers_list = resp.raw.headers.items()
@@ -49,6 +50,7 @@ class Corpus:
         self.writer.write_record(record)
         self.count += 1
     
-    def close(self):
+    def close(self) -> None:
+        """Closes current file, if not yet closed."""
         if not self.cur_file.closed:
             self.cur_file.close()
