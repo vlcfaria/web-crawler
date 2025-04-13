@@ -17,9 +17,9 @@ class PolicyManager:
         if h not in self.hosts:
             self._get_rules(h)
         
-        val = self.hosts[h]
+        val = self.hosts[h].crawl_delay('') if self.hosts[h] != None else None
 
-        return self.default_delay if val == None else val.crawl_delay('')
+        return self.default_delay if val == None else val
 
     def can_fetch(self, url: str) -> bool:
         "Returns if crawling the given url is allowed."
@@ -39,10 +39,10 @@ class PolicyManager:
         try:
             resp = requests.get(f"{host}/robots.txt", timeout=1) #Tighter timeout for robots
             resp.raise_for_status()
-            self.host2robots[host] = Protego.parse(resp.text)
+            self.hosts[host] = Protego.parse(resp.text)
 
         except requests.RequestException: #Website does not have robots.txt or not responding
-            self.host2robots[host] = None
+            self.hosts[host] = None
         
 
     def _extract_host(self, url):

@@ -23,8 +23,8 @@ class Crawler:
     Uses ordered dequeueing policy."""
 
     def __init__(self, seeds, to_crawl, verbose=False, default_delay = 0.1):
-        self.frontier = Frontier()
         self.policies = PolicyManager()
+        self.frontier = Frontier(self.policies)
         self.to_crawl = to_crawl #Number of pages to crawl
         self.verbose = verbose
         self.default_delay = default_delay
@@ -40,20 +40,20 @@ class Crawler:
             self.frontier.put(s)
     
     def crawl(self):
-        while not self.frontier.empty() and self.crawled < self.to_crawl:
+        while self.crawled < self.to_crawl:
 
             url = self.frontier.get() #Assumes crawl-delay is taken into account by frontier
             if not self.policies.can_fetch(url): #Will check robots.txt allow/disallow
                 continue
 
             try:
-                res = requests.get(url, stream=False)
+                res = requests.get(url, stream=False, timeout=5)
                 res.raise_for_status()
             except requests.exceptions.SSLError:
                 print(f'error: ssl error on {url}')
                 continue #TODO could try adding back to frontier with HTTP?
             except requests.exceptions.ConnectionError:
-                print('error: ConnectionError, no internet?')
+                print('error: ConnectionError on', url)
                 continue
             except requests.exceptions.Timeout:
                 print(f'error: timeout on {url}')
