@@ -1,12 +1,12 @@
 import requests
 import json
-from queue import Queue
 from url_normalize import url_normalize
 from bs4 import BeautifulSoup
 from time import time
 from Corpus import Corpus
 from urllib.parse import urlparse
-from protego import Protego
+from Frontier import Frontier
+from PolicyManager import PolicyManager
 import re
 
 #Taken from https://github.com/django/django/blob/main/django/core/validators.py
@@ -23,9 +23,9 @@ class Crawler:
     Uses ordered dequeueing policy."""
 
     def __init__(self, seeds, to_crawl, verbose=False, default_delay = 0.1):
-        self.frontier = Queue()
-        self.visited = set()
-        self.to_crawl = to_crawl
+        self.frontier = Frontier()
+        self.policies = PolicyManager()
+        self.to_crawl = to_crawl #Number of pages to crawl
         self.verbose = verbose
         self.default_delay = default_delay
 
@@ -38,13 +38,12 @@ class Crawler:
         for s in seeds:
             s = url_normalize(s) #Basic normalization, benefit of the doubt that seeds are simple urls
             self.frontier.put(s)
-            self.visited.add(s)
     
     def crawl(self):
         while not self.frontier.empty() and self.crawled < self.to_crawl:
 
             url = self.frontier.get() #Assumes crawl-delay is taken into account by frontier
-            if not self.url_crawlable(url): #Will check robots.txt allow/disallow
+            if not self.policies.can_fetch(url): #Will check robots.txt allow/disallow
                 continue
 
             try:
@@ -109,41 +108,7 @@ class Crawler:
             if re.match(url_regex, normal) == None: #Final check for URL malformation
                 continue
             
-            if normal not in self.visited: #Revisitation policy
-                self.frontier.put(normal)
-                self.visited.add(normal)
-    
-    def url_crawlable(self, url: str) -> bool:
-        """Checks if url is crawlable given host's robot.txt. Also checks for URL malformation.
-        Does not take into account crawl delay, as that is handled by the frontier.
-        
-        Only fetches according `robots.txt` if not yet in memory."""
-
-        parsed = urlparse(url)
-        origin = f"{parsed.scheme}://{parsed.netloc}"
-
-        #Quick check for malformed or not in http/https
-        if not (parsed.scheme in {'http', 'https'} and bool(parsed.netloc)): 
-            return False
-
-        if origin in self.host2robots: #Check local
-            val = self.host2robots[origin]
-
-            if type(val) == float: return True #robots not found, no link restrictions
-            return val.can_fetch(url, '')
-
-        #Gotta fetch
-        try:
-            resp = requests.get(f"{origin}/robots.txt", timeout=1) #Tighter timeout for robots
-            resp.raise_for_status()
-
-        except requests.RequestException: #Website does not have robots.txt or not responding
-            self.host2robots[origin] = self.default_delay
-            return True
-        
-        self.host2robots[origin] = Protego.parse(resp.text)
-        return self.host2robots[origin].can_fetch(url, '')
-
+            self.frontier.put(normal) #Frontier will handle visited set
 
     def print_request(self, url, soup):
         #Get first 20 words. Very inefficient, but ok due to debugging only
