@@ -47,7 +47,8 @@ class Crawler:
                 continue
 
             try:
-                res = requests.get(url, stream=False, timeout=5)
+                #Important detail -> disallow redirects
+                res = requests.get(url, stream=False, timeout=5, allow_redirects=False)
                 res.raise_for_status()
             except requests.exceptions.SSLError:
                 print(f'error: ssl error on {url}')
@@ -60,6 +61,14 @@ class Crawler:
                 continue #TODO maybe setup a retry
             except requests.exceptions.HTTPError as err:
                 print(f'error: httpError on {url}')
+                continue
+
+            #Handle redirects, by adding the new location back in frontier
+            if res.status_code in [301, 302, 307, 308]:
+                new_url = res.headers['Location']
+                new_url = self.normalize_url(url, new_url)
+                if new_url != '':
+                    self.frontier.put(new_url)
                 continue
 
             #MIME type must also be html
@@ -93,22 +102,32 @@ class Crawler:
             #Skip empty/missing href and hashes
             if link is None or link == '' or link[0] == '#': continue
 
-            #Handle relative url + relative protocols (url_normalize doesn't handle this well...)
-            if link[0:2] == '//':
-                link = f"{urlparse(url).scheme}://{link}"
-            elif link[0] == '/':
-                link = url + link
+            normal = self.normalize_url(url, link)
 
-            try:
-                normal = url_normalize(link, filter_params=True)
-                normal = normal.split('#', 1)[0] #Remove hashes # in links too
-            except: #Couldnt parse url, probably not an url in the first place...
-                continue
-                
-            if re.match(url_regex, normal) == None: #Final check for URL malformation
-                continue
+            if normal != '':
+                self.frontier.put(normal) #Frontier will handle visited set
+        
+    def normalize_url(self, original_url: str, new_url: str) -> str:
+        "Normalizes an URL. Handles relative urls and relative protocols. If URL is invalid, returns `''`."
+        og = new_url
+
+        #Handle relative url + relative protocols (url_normalize doesn't handle this well...)
+        if new_url[0:2] == '//':
+            new_url = f"{urlparse(original_url).scheme}:{new_url}"
+        elif new_url[0] == '/':
+            new_url = original_url + new_url
+
+        try:
+            normal = url_normalize(new_url, filter_params=True)
+            normal = normal.split('#', 1)[0] #Remove hashes # in links too
+        except: #Couldnt parse url, probably not an url in the first place...
+            return ''
             
-            self.frontier.put(normal) #Frontier will handle visited set
+        if re.match(url_regex, normal) == None: #Final check for URL malformation
+            return ''
+
+        return normal #Sucess
+
 
     def print_request(self, url, soup):
         #Get first 20 words. Very inefficient, but ok due to debugging only

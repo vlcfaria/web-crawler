@@ -44,7 +44,6 @@ class PolicyManager:
         except requests.RequestException: #Website does not have robots.txt or not responding
             self.hosts[host] = None
         
-
     def _extract_host(self, url):
         "Extracts the host from the URL. Assumes URL is valid."
 
