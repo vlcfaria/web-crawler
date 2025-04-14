@@ -2,12 +2,13 @@ import requests
 import json
 from url_normalize import url_normalize
 from bs4 import BeautifulSoup
-from time import time
+import time
 from Corpus import Corpus
 from urllib.parse import urlparse
 from Frontier import Frontier
 from PolicyManager import PolicyManager
 import re
+from threading import Lock
 
 #Taken from https://github.com/django/django/blob/main/django/core/validators.py
 url_regex = re.compile(
@@ -27,22 +28,26 @@ class Crawler:
         self.frontier = Frontier(self.policies)
         self.to_crawl = to_crawl #Number of pages to crawl
         self.verbose = verbose
-        self.default_delay = default_delay
-
         self.corpus = Corpus("./output")
 
-        self.host2robots = {}
-
         self.crawled = 0
+
+        self.lock = Lock()
 
         for s in seeds:
             s = url_normalize(s) #Basic normalization, benefit of the doubt that seeds are simple urls
             self.frontier.put(s)
     
     def crawl(self):
-        while self.crawled < self.to_crawl:
+        while True:
+            with self.lock:
+                if (self.crawled >= self.to_crawl): break
 
             url = self.frontier.get() #Assumes crawl-delay is taken into account by frontier
+            if url == '': #Nothing on frontier, wait a bit
+                time.sleep(1)
+                continue
+
             if not self.policies.can_fetch(url): #Will check robots.txt allow/disallow
                 continue
 
@@ -76,7 +81,9 @@ class Crawler:
             if not mime.startswith('text/html'): continue
 
             #All ok!
-            self.crawled += 1
+            #TODO: weird positioning.. Move this so we don't write ultrapass position
+            with self.lock:
+                self.crawled += 1
             soup = BeautifulSoup(res.text, 'html.parser')
 
             #Store in corpus + print
@@ -109,7 +116,6 @@ class Crawler:
         
     def normalize_url(self, original_url: str, new_url: str) -> str:
         "Normalizes an URL. Handles relative urls and relative protocols. If URL is invalid, returns `''`."
-        og = new_url
 
         #Handle relative url + relative protocols (url_normalize doesn't handle this well...)
         if new_url[0:2] == '//':
@@ -135,5 +141,5 @@ class Crawler:
         title = soup.title.text if soup.title else 'N/A'
 
         obj = {'URL': url, 'Title': title,
-               'Text': text, 'Timestamp': int(time())}
+               'Text': text, 'Timestamp': int(time.time())}
         print(json.dumps(obj, indent=1))

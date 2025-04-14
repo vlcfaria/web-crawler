@@ -1,6 +1,7 @@
 import argparse
 import sys
 from Crawler import Crawler
+import threading
 
 def parse_arguments():
     parser = argparse.ArgumentParser(prog='web-crawler')
@@ -30,4 +31,12 @@ if __name__ == '__main__':
     
     #Call crawler
     c = Crawler(seeds, args.n, args.d)
-    c.crawl()
+    
+    NUM_WORKERS = 10
+    threads = [threading.Thread(target=c.crawl) for _ in range(NUM_WORKERS)]
+
+    for t in threads:
+        t.start()
+    
+    for t in threads:
+        t.join()

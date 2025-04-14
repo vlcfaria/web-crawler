@@ -1,6 +1,7 @@
 from protego import Protego
 from urllib.parse import urlparse
 import requests
+from threading import Lock
 
 class PolicyManager:
     def __init__(self, default_delay=0.1):
@@ -9,15 +10,18 @@ class PolicyManager:
         self.hosts = {}
         self.default_delay = default_delay
 
+        self.lock = Lock()
+
     def get_delay(self, url: str) -> float:
         "Gets crawl-delay from host, or default delay if not inexistent."
 
         h = self._extract_host(url)
 
-        if h not in self.hosts:
-            self._get_rules(h)
+        with self.lock:
+            if h not in self.hosts:
+                self._get_rules(h)
         
-        val = self.hosts[h].crawl_delay('') if self.hosts[h] != None else None
+            val = self.hosts[h].crawl_delay('') if self.hosts[h] != None else None
 
         return self.default_delay if val == None else val
 
@@ -26,15 +30,16 @@ class PolicyManager:
 
         h = self._extract_host(url)
 
-        if h not in self.hosts:
-            self._get_rules(h)
+        with self.lock:
+            if h not in self.hosts:
+                self._get_rules(h)
 
-        val = self.hosts[h]
+            val = self.hosts[h]
 
         return True if val == None else val.can_fetch(url, '')
 
     def _get_rules(self, host: str) -> None:
-        "Fetches `robots.txt` from host"
+        "Acquire lock before calling!! Fetches `robots.txt` from host"
 
         try:
             resp = requests.get(f"{host}/robots.txt", timeout=1) #Tighter timeout for robots
