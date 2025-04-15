@@ -4,11 +4,14 @@ from url_normalize import url_normalize
 from bs4 import BeautifulSoup
 import time
 from Corpus import Corpus
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urljoin
 from Frontier import Frontier
 from PolicyManager import PolicyManager
 import re
 from threading import Lock
+
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 #Taken from https://github.com/django/django/blob/main/django/core/validators.py
 url_regex = re.compile(
@@ -23,22 +26,26 @@ class Crawler:
     """Base crawler class, responsible for basic crawling and managing similar structures. 
     Uses ordered dequeueing policy."""
 
-    def __init__(self, seeds, to_crawl, verbose=False, default_delay = 0.1):
+    def __init__(self, seeds, to_crawl, verbose=False, num_workers=10):
         self.policies = PolicyManager()
-        self.frontier = Frontier(self.policies)
+        self.frontier = Frontier(self.policies, num_workers)
         self.to_crawl = to_crawl #Number of pages to crawl
         self.verbose = verbose
         self.corpus = Corpus("./output")
 
         self.crawled = 0
+        self.headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/111.0.0.0 Safari/537.36'}
 
         self.lock = Lock()
 
         for s in seeds:
             s = url_normalize(s) #Basic normalization, benefit of the doubt that seeds are simple urls
             self.frontier.put(s)
+        
+        #Sessions is better than plain requests.get
+        self.sessions = [requests.session() for _ in range(num_workers)]
     
-    def crawl(self):
+    def crawl(self, tid):
         while True:
             with self.lock:
                 if (self.crawled >= self.to_crawl): break
@@ -53,19 +60,21 @@ class Crawler:
 
             try:
                 #Important detail -> disallow redirects
-                res = requests.get(url, stream=False, timeout=5, allow_redirects=False)
+                res = self.sessions[tid].get(url, stream=False, timeout=5, allow_redirects=False, headers=self.headers)
                 res.raise_for_status()
             except requests.exceptions.SSLError:
                 print(f'error: ssl error on {url}')
                 continue #TODO could try adding back to frontier with HTTP?
-            except requests.exceptions.ConnectionError:
+            except requests.exceptions.ConnectionError as e:
                 print('error: ConnectionError on', url)
+                print(e)
                 continue
             except requests.exceptions.Timeout:
                 print(f'error: timeout on {url}')
                 continue #TODO maybe setup a retry
             except requests.exceptions.HTTPError as err:
                 print(f'error: httpError on {url}')
+                print(err)
                 continue
 
             #Handle redirects, by adding the new location back in frontier
@@ -81,11 +90,12 @@ class Crawler:
             if not mime.startswith('text/html'): continue
 
             #All ok!
-            #TODO: weird positioning.. Move this so we don't write ultrapass position
-            with self.lock:
-                self.crawled += 1
             soup = BeautifulSoup(res.text, 'html.parser')
 
+            with self.lock: #One last check before writing
+                if self.crawled >= self.to_crawl: break
+                self.crawled += 1
+            
             #Store in corpus + print
             self.corpus.write(url, res)
 
@@ -118,11 +128,8 @@ class Crawler:
         "Normalizes an URL. Handles relative urls and relative protocols. If URL is invalid, returns `''`."
 
         #Handle relative url + relative protocols (url_normalize doesn't handle this well...)
-        if new_url[0:2] == '//':
-            new_url = f"{urlparse(original_url).scheme}:{new_url}"
-        elif new_url[0] == '/':
-            new_url = original_url + new_url
-
+        new_url = urljoin(original_url, new_url)
+       
         try:
             normal = url_normalize(new_url, filter_params=True)
             normal = normal.split('#', 1)[0] #Remove hashes # in links too

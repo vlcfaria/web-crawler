@@ -8,13 +8,11 @@ from threading import Lock
 
 class Frontier:
     """Mercator style URL frontier."""
-    def __init__(self, policies: PolicyManager):
-        NUM_WORKERS = 10 #TODO make this variable
-
+    def __init__(self, policies: PolicyManager, num_workers):
         self.front = Queue() #Front is a simple queue, no prioritization yet
         
         #Mercator recommendation #back_queues = 3 * crawler threads
-        self.back = [Queue() for _ in range(3*NUM_WORKERS)]
+        self.back = [Queue() for _ in range(3*num_workers)]
         self.inactive_back = set(range(len(self.back))) #Track inactive back queues
 
         self.domain_map = {} #Maps domain -> back queue
