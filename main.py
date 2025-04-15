@@ -30,9 +30,8 @@ if __name__ == '__main__':
         sys.exit(f"error: file {args.s} not found")
     
     #Call crawler
-    c = Crawler(seeds, args.n, args.d)
-    
     NUM_WORKERS = 25
+    c = Crawler(seeds, args.n, args.d, NUM_WORKERS)
     threads = [threading.Thread(target=c.crawl, args= (i,)) for i in range(NUM_WORKERS)]
 
     for t in threads:
