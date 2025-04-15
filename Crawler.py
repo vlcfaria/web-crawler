@@ -46,41 +46,18 @@ class Crawler:
         self.sessions = [requests.session() for _ in range(num_workers)]
     
     def crawl(self, tid):
+        fetch_func = (lambda url: self.fetch_url(url, tid))
         while True:
             with self.lock:
                 if (self.crawled >= self.to_crawl): break
 
-            url = self.frontier.get() #Assumes crawl-delay is taken into account by frontier
-            if url == '': #Nothing on frontier, wait a bit
-                time.sleep(1)
-                continue
-
-            if not self.policies.can_fetch(url): #Will check robots.txt allow/disallow
-                continue
-
-            try:
-                #Important detail -> disallow redirects
-                res = self.sessions[tid].get(url, stream=False, timeout=5, allow_redirects=False, headers=self.headers)
-                res.raise_for_status()
-            except requests.exceptions.SSLError:
-                print(f'error: ssl error on {url}')
-                continue #TODO could try adding back to frontier with HTTP?
-            except requests.exceptions.ConnectionError as e:
-                print('error: ConnectionError on', url)
-                print(e)
-                continue
-            except requests.exceptions.Timeout:
-                print(f'error: timeout on {url}')
-                continue #TODO maybe setup a retry
-            except requests.exceptions.HTTPError as err:
-                print(f'error: httpError on {url}')
-                print(err)
-                continue
+            res = self.frontier.get(fetch_func) #Assumes crawl-delay is taken into account by frontier
+            if res == None: continue #Fetch unsuccesful
 
             #Handle redirects, by adding the new location back in frontier
             if res.status_code in [301, 302, 307, 308]:
                 new_url = res.headers['Location']
-                new_url = self.normalize_url(url, new_url)
+                new_url = self.normalize_url(res.url, new_url)
                 if new_url != '':
                     self.frontier.put(new_url)
                 continue
@@ -97,15 +74,42 @@ class Crawler:
                 self.crawled += 1
             
             #Store in corpus + print
-            self.corpus.write(url, res)
+            self.corpus.write(res.url, res)
 
             if self.verbose:
                 self.print_request(res.url, soup)
             
-            self.process_outlinks(url, soup)
+            self.process_outlinks(res.url, soup)
 
         self.corpus.close()
     
+    def fetch_url(self, url, tid) -> requests.models.Response | None:
+        "Fetches a given URL. Returns None if fetch was unsucessful according to `robots.txt` or other errors."
+
+        if not self.policies.can_fetch(url): #Will check robots.txt allow/disallow
+            return None
+        
+        try:
+            #Important detail -> disallow redirects
+            res = self.sessions[tid].get(url, stream=False, timeout=5, allow_redirects=False, headers=self.headers)
+            res.raise_for_status()
+        except requests.exceptions.SSLError:
+            print(f'error: ssl error on {url}')
+            return None
+        except requests.exceptions.ConnectionError as e:
+            print('error: ConnectionError on', url)
+            print(e)
+            return None
+        except requests.exceptions.Timeout:
+            print(f'error: timeout on {url}')
+            return None
+        except requests.exceptions.HTTPError as err:
+            print(f'error: httpError on {url}')
+            print(err)
+            return None
+        
+        return res
+
     def process_outlinks(self, url: str, soup: BeautifulSoup) -> None:
         """Processes outlinks parsed in all <a> tags in parsed structure, while also checking for url malformation and invalid protocols.
         

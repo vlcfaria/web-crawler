@@ -5,6 +5,7 @@ from urllib.parse import urlparse
 from PolicyManager import PolicyManager
 import threading
 from enum import Enum
+import requests
 
 class Signal(Enum):
     EMPTY = 1
@@ -23,7 +24,6 @@ class Frontier:
         self.inactive_back = set(range(len(self.back))) #Track inactive back queues
         self.domain_map = {} #Maps domain -> back queue
 
-
         self.heap_lock = threading.Lock()
         self.heap = [] #Maintain heap for politeness
 
@@ -33,40 +33,50 @@ class Frontier:
         self.policies = policies
 
         #Start scheduler
+        self.scheduler_finished = threading.Condition(lock=self.heap_lock)
         self.scheduler = threading.Thread(target=self._scheduler_loop, daemon=True)
         self.scheduler.start()
 
-    def get(self) -> str:
-        "Fetches an URL from the frontier"
+    def get(self, fetch_func) -> tuple[str, bool]:
+        "Grabs an URL from the frontier, calls `fetch_func`, handles structures and returns original `fetch_func` returned value"
         
         #Nothing on heap means: nothing on back queues OR less back queues filled than threads (usually at start)
-        if not self.heap:
-            self.scheduler_notif.put((Signal.FILL, '')) #Call scheduler
-        
-        #TODO avoid loops here when all links end?
-        if not self.heap: #If STILL nothing on heap, wait a bit so others populate it again
-            return ''
+        with self.heap_lock:
+            if not self.heap:
+                self.scheduler_notif.put((Signal.FILL, '')) #Call scheduler
+                #Wait until scheduler ends populating
+                self.scheduler_finished.wait()
+            #If STILL nothing, wait nothing, wait & return
+            if not self.heap:
+                time.sleep(1)
+                return None
         
         allowed_time, back_idx = heapq.heappop(self.heap)
         url = self.back[back_idx].get()
 
         empty = False
-        if self.back[back_idx].qsize() == 0:
-            empty = True
-            domain = self._url_to_domain(url)
-            self.scheduler_notif.put((Signal.EMPTY, domain))
+
+        #This MIGHT be empty, but the scheduler can also be inserting data in the meantime
+        #The only thread that can confirm this as empty is the scheduler 
+        empty = self.back[back_idx].qsize() == 0
     
         #Enforce politeness. Should only realistically happen at beggining (few domains)
         now = time.time()
         if now < allowed_time:
             time.sleep(allowed_time - now)
         
-        #Determine new fetching time, if host didnt change
-        with self.heap_lock:
-            if not empty:
+        #Fetch!
+        ans = fetch_func(url)
+
+        #Post-processing
+        if empty: #Hint to the scheduler that this might be empty
+            domain = self._url_to_domain(url)
+            self.scheduler_notif.put((Signal.EMPTY, domain))
+        else: #Just re-add
+            with self.heap_lock:
                 heapq.heappush(self.heap, (time.time() + self.policies.get_delay(url), back_idx))
 
-        return url
+        return ans
 
     def put(self, url: str) -> None:
         "Takes in an url to be put into frontier, if not yet seen."
@@ -87,9 +97,15 @@ class Frontier:
             #Wait for requests
             signal, domain = self.scheduler_notif.get()
 
-            if signal == Signal.EMPTY: #Have to delete from map and add to inactive first
-                self.inactive_back.add(self.domain_map[domain])
-                del self.domain_map[domain]
+            if signal == Signal.EMPTY: #Worker hinted that this might be empty, check
+                if self.back[self.domain_map[domain]]: #Really is empty
+                    self.inactive_back.add(self.domain_map[domain])
+                    del self.domain_map[domain]
+                else:
+                    delay = self.policies.get_delay(domain)
+                    with self.heap_lock:
+                        heapq.heappush(self.heap, (time.time()+delay, self.domain_map[domain]))
+                    continue #Also skip next section
 
             #Now do regular work: fill back queues!
             while self.front.qsize() != 0 and len(self.inactive_back) != 0:
@@ -108,6 +124,10 @@ class Frontier:
                     delay = self.policies.get_delay(domain)
                     with self.heap_lock:
                         heapq.heappush(self.heap, (time.time() + delay, idx))
+
+            #TODO warn that this was filled..
+            with self.heap_lock:
+                self.scheduler_finished.notify_all()
             
     def _url_to_domain(self, url: str) -> str:
         'Gets the domain from an URL'
