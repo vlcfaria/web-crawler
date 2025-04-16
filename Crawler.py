@@ -28,7 +28,8 @@ class Crawler:
 
     def __init__(self, seeds, to_crawl, verbose=False, num_workers=10):
         self.policies = PolicyManager()
-        self.frontier = Frontier(self.policies, num_workers)
+        #Benefit of the doubt, assume that starting seeds are well-formatted URL
+        self.frontier = Frontier(self.policies, num_workers, [url_normalize(s) for s in seeds])
         self.to_crawl = to_crawl #Number of pages to crawl
         self.verbose = verbose
         self.corpus = Corpus("./output")
@@ -37,13 +38,16 @@ class Crawler:
         self.headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/111.0.0.0 Safari/537.36'}
 
         self.lock = Lock()
-
-        for s in seeds:
-            s = url_normalize(s) #Basic normalization, benefit of the doubt that seeds are simple urls
-            self.frontier.put(s)
         
         #Sessions is better than plain requests.get
         self.sessions = [requests.session() for _ in range(num_workers)]
+
+        #TODO check if this makes it betters
+        for s in self.sessions:
+            retries = Retry(total=3, backoff_factor=0.3)
+            adapter = HTTPAdapter(max_retries=retries)
+            s.mount("http://", adapter)
+            s.mount("https://", adapter)
     
     def crawl(self, tid):
         fetch_func = (lambda url: self.fetch_url(url, tid))
@@ -72,7 +76,7 @@ class Crawler:
             with self.lock: #One last check before writing
                 if self.crawled >= self.to_crawl: break
                 self.crawled += 1
-            
+
             #Store in corpus + print
             self.corpus.write(res.url, res)
 
@@ -82,6 +86,7 @@ class Crawler:
             self.process_outlinks(res.url, soup)
 
         self.corpus.close()
+        print(tid, "EXITED")
     
     def fetch_url(self, url, tid) -> requests.models.Response | None:
         "Fetches a given URL. Returns None if fetch was unsucessful according to `robots.txt` or other errors."
