@@ -57,6 +57,7 @@ class Frontier:
             domain = self._url_to_domain(url)
             with self.hinted_empty_lock:
                 self.hinted_empty.add(domain)
+            self.has_empty.set()
         else: #Just re-add
             self.heap.put_nowait((time.time() + self.policies.get_delay(url), back_idx))
 
@@ -78,6 +79,8 @@ class Frontier:
         "Manages scheduling of back queues and front queues, handling required structures."
 
         while(True):
+            self.has_empty.clear()
+
             with self.hinted_empty_lock:
                 while self.hinted_empty:
                     domain = self.hinted_empty.pop()
@@ -114,6 +117,12 @@ class Frontier:
                     #Add delay just in case
                     delay = self.policies.get_delay(domain)
                     self.heap.put_nowait((time.time() + delay, idx))
+        
+            if len(self.inactive_back) == len(self.back): #Everything is inactive, nothing will call empty
+                time.sleep(.1)
+            else:
+                self.has_empty.wait()
+
             
     def _url_to_domain(self, url: str) -> str:
         'Gets the domain from an URL'
