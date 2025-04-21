@@ -60,6 +60,8 @@ class Crawler:
 
             #Handle redirects, by adding the new location back in frontier
             if res.status_code in [301, 302, 307, 308]:
+                if 'Location' not in res.headers:
+                    continue #Redirect, but no location??
                 new_url = res.headers['Location']
                 new_url = self.normalize_url(res.url, new_url)
                 if new_url != '':
@@ -99,18 +101,18 @@ class Crawler:
             res = self.sessions[tid].get(url, stream=False, timeout=5, allow_redirects=False, headers=self.headers)
             res.raise_for_status()
         except requests.exceptions.SSLError:
-            print(f'error: ssl error on {url}')
+            #print(f'error: ssl error on {url}')
             return None
         except requests.exceptions.ConnectionError as e:
-            print('error: ConnectionError on', url)
-            print(e)
+            #print('error: ConnectionError on', url)
+            #print(e)
             return None
         except requests.exceptions.Timeout:
-            print(f'error: timeout on {url}')
+            #print(f'error: timeout on {url}')
             return None
         except requests.exceptions.HTTPError as err:
-            print(f'error: httpError on {url}')
-            print(err)
+            #print(f'error: httpError on {url}')
+            #print(err)
             return None
         
         return res
@@ -138,14 +140,15 @@ class Crawler:
 
         #Handle relative url + relative protocols (url_normalize doesn't handle this well...)
         new_url = urljoin(original_url, new_url)
+
+        #Check this BEFORE normalization, since url_normalize is apparently very cost inneficient
+        if re.match(url_regex, new_url) == None:
+            return ''
        
         try:
             normal = url_normalize(new_url, filter_params=True)
             normal = normal.split('#', 1)[0] #Remove hashes # in links too
         except: #Couldnt parse url, probably not an url in the first place...
-            return ''
-            
-        if re.match(url_regex, normal) == None: #Final check for URL malformation
             return ''
 
         return normal #Sucess

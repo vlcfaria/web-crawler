@@ -50,7 +50,8 @@ class Frontier:
         ans = fetch_func(url)
 
         #This MIGHT be empty, but the scheduler can also be inserting data in the meantime
-        #The only thread that can confirm this as empty is the scheduler 
+        #The only thread that can confirm this as empty is the scheduler
+        #TODO maybe rework this by inserting into heap anyway, and trying get_nowait with try catch?
         empty = self.back[back_idx].qsize() == 0
 
         if empty: #Hint to the scheduler that this might be empty, he will handle it
