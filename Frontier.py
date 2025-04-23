@@ -1,5 +1,5 @@
 from queue import Queue, PriorityQueue
-import heapq
+from BloomFilter import BloomFilter
 import time
 from urllib.parse import urlparse
 from PolicyManager import PolicyManager
@@ -7,7 +7,7 @@ import threading
 
 class Frontier:
     """Mercator style URL frontier."""
-    def __init__(self, policies: PolicyManager, num_workers, starting):
+    def __init__(self, policies: PolicyManager, num_workers, starting, filter_size, filter_error=.01):
         self.front = Queue() #Front is a simple queue, no prioritization yet
         for url in starting:
             self.front.put(url)
@@ -22,7 +22,7 @@ class Frontier:
         self.heap = PriorityQueue() #Maintain heap for politeness
 
         self.visited_lock = threading.Lock()
-        self.visited = set()
+        self.visited = BloomFilter(filter_size, filter_error)
 
         self.policies = policies
 
@@ -68,7 +68,7 @@ class Frontier:
         "Takes in an url to be put into frontier, if not yet seen."
 
         with self.visited_lock:
-            if url in self.visited:
+            if self.visited.check(url):
                 return
             
             self.visited.add(url)

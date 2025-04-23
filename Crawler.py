@@ -26,10 +26,10 @@ class Crawler:
     """Base crawler class, responsible for basic crawling and managing similar structures. 
     Uses ordered dequeueing policy."""
 
-    def __init__(self, seeds, to_crawl, verbose=False, num_workers=10):
+    def __init__(self, seeds, to_crawl, verbose=False, num_workers=10, filter_ratio=1000):
         self.policies = PolicyManager()
         #Benefit of the doubt, assume that starting seeds are well-formatted URL
-        self.frontier = Frontier(self.policies, num_workers, [url_normalize(s) for s in seeds])
+        self.frontier = Frontier(self.policies, num_workers, [url_normalize(s) for s in seeds], filter_ratio * to_crawl)
         self.to_crawl = to_crawl #Number of pages to crawl
         self.verbose = verbose
         self.corpus = Corpus("./output")
@@ -88,8 +88,7 @@ class Crawler:
             self.process_outlinks(res.url, soup)
 
         self.corpus.close()
-        print(tid, "EXITED")
-    
+            
     def fetch_url(self, url, tid) -> requests.models.Response | None:
         "Fetches a given URL. Returns None if fetch was unsucessful according to `robots.txt` or other errors."
 
@@ -138,8 +137,11 @@ class Crawler:
     def normalize_url(self, original_url: str, new_url: str) -> str:
         "Normalizes an URL. Handles relative urls and relative protocols. If URL is invalid, returns `''`."
 
-        #Handle relative url + relative protocols (url_normalize doesn't handle this well...)
-        new_url = urljoin(original_url, new_url)
+        #Handle relative url + relative protocols
+        try:
+            new_url = urljoin(original_url, new_url)
+        except: #A lot can go wrong here, just skip if needed
+            return ''
 
         #Check this BEFORE normalization, since url_normalize is apparently very cost inneficient
         if re.match(url_regex, new_url) == None:
