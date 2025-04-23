@@ -69,6 +69,8 @@ class Frontier:
         "Takes in an url to be put into frontier, if not yet seen."
 
         with self.visited_lock:
+            # Check BEFORE putting into front queue
+            # This increases network usage, but reduces URLs added into visited & synchronization overhead
             if self.visited.check(url):
                 return
             
@@ -131,7 +133,7 @@ class Frontier:
             else:
                 self.has_empty.wait()
 
-            
+
     def _url_to_domain(self, url: str) -> str:
         'Gets the domain from an URL'
 
