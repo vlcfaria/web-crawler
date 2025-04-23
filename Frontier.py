@@ -1,4 +1,4 @@
-from queue import Queue, PriorityQueue
+from queue import Queue, PriorityQueue, Empty
 from BloomFilter import BloomFilter
 import time
 from urllib.parse import urlparse
@@ -17,7 +17,7 @@ class Frontier:
 
         #These 2 structures don't need locks, only handled by scheduler (single thread)
         self.inactive_back = set(range(len(self.back))) #Track inactive back queues
-        self.domain_map = {} #Maps domain -> back queue
+        self.domain_map = {} #Maps domain -> back queue, and back queue -> domain (Two way map)
 
         self.heap = PriorityQueue() #Maintain heap for politeness
 
@@ -27,7 +27,7 @@ class Frontier:
         self.policies = policies
 
         self.hinted_empty_lock = threading.Lock()
-        self.hinted_empty = set() #Hints at scheduler back queues that may be empty
+        self.hinted_empty = set() #Hints at scheduler back queues indexes that may be empty
         self.has_empty = threading.Event()
 
         #Start scheduler
@@ -38,8 +38,19 @@ class Frontier:
         "Grabs an URL from the frontier, calls `fetch_func`, handles structures and returns original `fetch_func` returned value"
         
         #Nothing on heap means: nothing on back queues OR less back queues filled than threads (usually at start)
-        allowed_time, back_idx = self.heap.get() #Blocking
-        url = self.back[back_idx].get_nowait() #Guaranteed to be there, no waiting
+        try:
+            allowed_time, back_idx = self.heap.get(timeout=60) #Blocking
+        except Empty:
+            return None
+
+        try:
+            url = self.back[back_idx].get_nowait()
+        except Empty: #Warn scheduler that this is empty
+            with self.hinted_empty_lock:
+                self.hinted_empty.add(back_idx)
+            self.has_empty.set()
+
+            return None
 
         #Enforce politeness. Should only realistically happen at beggining (few domains)
         now = time.time()
@@ -49,18 +60,8 @@ class Frontier:
         #Fetch!
         ans = fetch_func(url)
 
-        #This MIGHT be empty, but the scheduler can also be inserting data in the meantime
-        #The only thread that can confirm this as empty is the scheduler
-        #TODO maybe rework this by inserting into heap anyway, and trying get_nowait with try catch?
-        empty = self.back[back_idx].qsize() == 0
-
-        if empty: #Hint to the scheduler that this might be empty, he will handle it
-            domain = self._url_to_domain(url)
-            with self.hinted_empty_lock:
-                self.hinted_empty.add(domain)
-            self.has_empty.set()
-        else: #Just re-add
-            self.heap.put_nowait((time.time() + self.policies.get_delay(url), back_idx))
+        #Re-add. If back queue is empty, it will be caught in the above exception
+        self.heap.put_nowait((time.time() + self.policies.get_delay(url), back_idx))
 
         return ans
 
@@ -84,13 +85,17 @@ class Frontier:
 
             with self.hinted_empty_lock:
                 while self.hinted_empty:
-                    domain = self.hinted_empty.pop()
-                    if self.back[self.domain_map[domain]].qsize() == 0: #Really is empty
-                        self.inactive_back.add(self.domain_map[domain])
-                        del self.domain_map[domain]
+                    idx = self.hinted_empty.pop()
+                    if self.back[idx].qsize() == 0: #Really is empty
+                        self.inactive_back.add(idx)
+
+                        domain = self.domain_map[idx]
+                        del self.domain_map[idx] #idx -> domain
+                        del self.domain_map[domain] #domain -> idx
+            
                     else:
-                        delay = self.policies.get_delay(domain)
-                        self.heap.put((time.time()+delay, self.domain_map[domain]))
+                        delay = self.policies.get_delay(self.domain_map[idx])
+                        self.heap.put((time.time()+delay, idx))
             
             
             #Check if we need to fill, either by empty heap or new empty entry        
@@ -100,20 +105,22 @@ class Frontier:
 
                 if domain in self.domain_map: #Already in a back queue
                     self.back[self.domain_map[domain]].put_nowait(url)
+
                     #Preventing future work: check if this was called for inactive_back
                     add = False
                     with self.hinted_empty_lock:
-                        if domain in self.hinted_empty:
+                        if self.domain_map[domain] in self.hinted_empty:
                             add = True
-                            self.hinted_empty.remove(domain)
+                            self.hinted_empty.remove(self.domain_map[domain]) #Remove the index
                     if add:
-                        self.heap.put((time.time() + self.policies.get_delay(domain), self.domain_map[domain]))
+                        self.heap.put((time.time(), self.domain_map[domain]))
 
                 else: #Allocate an empty back queue
                     idx = self.inactive_back.pop()
                     #Put in actual queue + register on map & heap
                     self.back[idx].put(url)
                     self.domain_map[domain] = idx
+                    self.domain_map[idx] = domain
 
                     #Add delay just in case
                     delay = self.policies.get_delay(domain)
