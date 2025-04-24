@@ -68,8 +68,8 @@ class Crawler:
                     self.frontier.put(new_url)
                 continue
 
-            #MIME type must also be html
-            mime = res.headers.get('Content-type', '')
+            #Double check MIME type
+            mime = res.headers.get('Content-Type', '')
             if not mime.startswith('text/html'): continue
 
             #All ok!
@@ -95,23 +95,33 @@ class Crawler:
         if not self.policies.can_fetch(url): #Will check robots.txt allow/disallow
             return None
         
+        #Fetch head to see if this is a text/html
+        try:
+            head = self.sessions[tid].head(url, stream=False, timeout=5, allow_redirects=False, headers=self.headers)
+        except: #Too much can go wrong...
+            return None
+        
+        # Accept only mime-html OR a redirect
+        mime = head.headers.get('Content-Type', '')
+        if not ('text/html' in mime or head.status_code in [301, 302, 307, 308]):
+            return None
+        
+        #Fetch actual content
         try:
             #Important detail -> disallow redirects
             res = self.sessions[tid].get(url, stream=False, timeout=5, allow_redirects=False, headers=self.headers)
             res.raise_for_status()
+
+        #Placeholder for exceptions... Since this is a broad crawl, it's fine to skip everything
         except requests.exceptions.SSLError:
-            #print(f'error: ssl error on {url}')
             return None
-        except requests.exceptions.ConnectionError as e:
-            #print('error: ConnectionError on', url)
-            #print(e)
+        except requests.exceptions.ConnectionError:
             return None
         except requests.exceptions.Timeout:
-            #print(f'error: timeout on {url}')
             return None
-        except requests.exceptions.HTTPError as err:
-            #print(f'error: httpError on {url}')
-            #print(err)
+        except requests.exceptions.HTTPError:
+            return None
+        except: #Unknown exception, fine to skip
             return None
         
         return res

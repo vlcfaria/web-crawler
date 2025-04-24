@@ -1,4 +1,4 @@
-from queue import Queue, PriorityQueue, Empty
+from queue import Queue, PriorityQueue, Empty, Full
 from BloomFilter import BloomFilter
 import time
 from urllib.parse import urlparse
@@ -69,8 +69,7 @@ class Frontier:
         "Takes in an url to be put into frontier, if not yet seen."
 
         with self.visited_lock:
-            # Check BEFORE putting into front queue
-            # This increases network usage, but reduces URLs added into visited & synchronization overhead
+            #Not seen before
             if self.visited.check(url):
                 return
             
