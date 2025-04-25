@@ -23,39 +23,53 @@ url_regex = re.compile(
         r'(?:/?|[/?]\S+)$', re.IGNORECASE)
 
 class Crawler:
-    """Base crawler class, responsible for basic crawling and managing similar structures. 
-    Uses ordered dequeueing policy."""
+    '''
+    Base crawler class, responsible for basic crawling and managing related structures.
+    Aside from interacting with the Frontier, Corpus and Policy Manager, the main responsibility of the Crawler
+    is to fetch URLS and parse the given response, eventually processing and filtering new URLs, adding them to the frontier
+    '''
 
-    def __init__(self, seeds, to_crawl, verbose=False, num_workers=10, filter_ratio=1000):
+    def __init__(self, seeds: list[str], to_crawl: int, verbose: bool=False, 
+                 num_workers: int=10, filter_ratio: int=1000):
+        '''
+        Initializes Crawler class, specified `num_workers` threads to be used. `filter_ratio` will be multiplied by `to_crawl` to determine the size
+        of the Frontier's Bloom Filter, that is because URLs are marked as visited BEFORE being added to the frontier. If you expect a lot of junk/404s,
+        consider a larger value.
+        '''
+
+        #Structures
         self.policies = PolicyManager()
-        #Benefit of the doubt, assume that starting seeds are well-formatted URL
         self.frontier = Frontier(self.policies, num_workers, [url_normalize(s) for s in seeds], filter_ratio * to_crawl)
+
+        #General attributes
         self.to_crawl = to_crawl #Number of pages to crawl
         self.verbose = verbose
         self.corpus = Corpus("./output")
-
         self.crawled = 0
-        self.headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/111.0.0.0 Safari/537.36'}
-
         self.lock = Lock()
         
-        #Sessions is better than plain requests.get
+        #Setup sessions
+        self.headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/111.0.0.0 Safari/537.36'}
         self.sessions = [requests.session() for _ in range(num_workers)]
-
-        #TODO check if this makes it betters
         for s in self.sessions:
             retries = Retry(total=3, backoff_factor=0.3)
             adapter = HTTPAdapter(max_retries=retries)
             s.mount("http://", adapter)
             s.mount("https://", adapter)
     
-    def crawl(self, tid):
+    def crawl(self, tid: int) -> None:
+        '''
+        Basic crawling function. Gets response directly from frontier, where `fetch_func` is called.
+        If response is valid, parses and processes outlinks. Also handles redirects.
+        '''
+        # Need to call with tid
         fetch_func = (lambda url: self.fetch_url(url, tid))
+
         while True:
-            with self.lock:
+            with self.lock: #Done with crawl
                 if (self.crawled >= self.to_crawl): break
 
-            res = self.frontier.get(fetch_func) #Assumes crawl-delay is taken into account by frontier
+            res = self.frontier.get(fetch_func)
             if res == None: continue #Fetch unsuccesful
 
             #Handle redirects, by adding the new location back in frontier
@@ -81,7 +95,6 @@ class Crawler:
 
             #Store in corpus + print
             self.corpus.write(res.url, res)
-
             if self.verbose:
                 self.print_request(res.url, soup)
             
@@ -90,7 +103,10 @@ class Crawler:
         self.corpus.close()
             
     def fetch_url(self, url, tid) -> requests.models.Response | None:
-        "Fetches a given URL. Returns None if fetch was unsucessful according to `robots.txt` or other errors."
+        '''
+        Fetches a given URL. Returns None if fetch was unsucessful according to `robots.txt` or other errors.
+        This function also first requests a HEAD to confirm the resource is actually `text/html`.
+        '''
 
         if not self.policies.can_fetch(url): #Will check robots.txt allow/disallow
             return None
@@ -128,10 +144,10 @@ class Crawler:
         return res
 
     def process_outlinks(self, url: str, soup: BeautifulSoup) -> None:
-        """Processes outlinks parsed in all <a> tags in parsed structure, while also checking for url malformation and invalid protocols.
-        
+        '''
+        Processes outlinks parsed in all <a> tags in parsed structure, while also checking for url malformation and invalid protocols.
         Handles malformatted urls, relative urls and protocols, while also performing url normalization. Only HTTP/HTTPS protocols are allowed.
-        """
+        '''
 
         #Expand queue by finding links
         for tag in soup.find_all('a'):
@@ -146,7 +162,7 @@ class Crawler:
                 self.frontier.put(normal) #Frontier will handle visited set
         
     def normalize_url(self, original_url: str, new_url: str) -> str:
-        "Normalizes an URL. Handles relative urls and relative protocols. If URL is invalid, returns `''`."
+        '''Normalizes an URL. Handles relative urls and relative protocols. If URL is invalid, returns `''`.'''
 
         #Handle relative url + relative protocols
         try:
@@ -165,7 +181,6 @@ class Crawler:
             return ''
 
         return normal #Sucess
-
 
     def print_request(self, url, soup):
         #Get first 20 words. Very inefficient, but ok due to debugging only

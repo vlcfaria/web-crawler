@@ -5,9 +5,12 @@ from threading import Lock
 from collections import OrderedDict
 
 class PolicyManager:
-    def __init__(self, cache_size=1000, default_delay=0.1):
-        "Class for holding `robots.txt` info for both the crawler and the frontier."
+    '''
+    Synchronized class that manages policy data specified in `robots.txt` such as crawl-delay and allowed/disallowed pages.
+    To avoid excess memory usage and eventually update old `robots.txt` files, this class operates on a cache.
+    '''
 
+    def __init__(self, cache_size:int=1000, default_delay:float=0.1):
         self.cache = OrderedDict() #Caches hosts' robots.txt
         self.cache_size = cache_size
 
@@ -16,7 +19,7 @@ class PolicyManager:
         self.lock = Lock()
 
     def get_delay(self, url: str) -> float:
-        "Gets crawl-delay from host, or default delay if not inexistent."
+        '''Gets crawl-delay from host, or default delay if not inexistent.'''
 
         h = self._extract_host(url)
 
@@ -31,7 +34,7 @@ class PolicyManager:
         return self.default_delay if val == None else val
 
     def can_fetch(self, url: str) -> bool:
-        "Returns if crawling the given url is allowed."
+        '''Returns if crawling the given url is allowed.'''
 
         h = self._extract_host(url)
 
@@ -46,7 +49,7 @@ class PolicyManager:
         return True if val == None else val.can_fetch(url, '')
 
     def _get_rules(self, host: str) -> None:
-        "Acquire lock before calling!! Fetches `robots.txt` from host"
+        '''Acquire lock before calling!! Fetches `robots.txt` from host'''
 
         if len(self.cache) >= self.cache_size: # remove LRU cache
             self.cache.popitem(last=False)
@@ -59,12 +62,13 @@ class PolicyManager:
         except requests.RequestException: #Website does not have robots.txt or not responding
             self.cache[host] = None
     
-    def _touch(self, host : str) -> None:
-        "Move a host to end, indicating it was used"
+    def _touch(self, host: str) -> None:
+        '''Move a host to end, indicating it was used'''
+
         self.cache.move_to_end(host)
 
-    def _extract_host(self, url):
-        "Extracts the host from the URL. Assumes URL is valid."
+    def _extract_host(self, url: str) -> str:
+        '''Extracts the host from the URL. Assumes URL is valid.'''
 
         parsed = urlparse(url)
         return f"{parsed.scheme}://{parsed.netloc}"

@@ -2,7 +2,10 @@ import math
 import hashlib
 
 class BloomFilter:
-    def __init__(self, num_items, epsilon=0.01, hash_func = hashlib.sha512):
+    '''Class representing a Bloom Filter, a probabilistic set-like structure which saves memory by not storing items themselves,
+    but hashing the items and storing them int a bitarray'''
+
+    def __init__(self, num_items: int, epsilon: float=0.01):
         #Number of hash functions
         self.k = int(math.ceil(-math.log(epsilon) / math.log(2)))
 
@@ -11,7 +14,8 @@ class BloomFilter:
 
         self.bitset = bytearray((self.size + 7) // 8)
 
-        self.hash_func = hash_func
+        #Good practice would be to parameterize this
+        self.hash_func = hashlib.sha512
 
     def add(self, s:str):
         '''Adds `s` into bloom filter'''
@@ -21,7 +25,7 @@ class BloomFilter:
         for _ in range(self.k):
             self._set_bit(hsh)
             #Apply Kirsch-Mitzenmacher-Optimization hi = h1 + ih2 mod m
-            #Should work even if self.size is not a prime?
+            #Should work OK even if self.size is not a prime?
             hsh = (hsh + h2) % self.size
 
     def check(self, s:str):
@@ -35,7 +39,7 @@ class BloomFilter:
         return True
 
     def _get_h1_h2(self, s:str):
-        '''Gets hashes `h1` and `h2`, which can determine all k hashes (Kirsch-Mitzenmacher)'''
+        '''Gets hashes `h1` and `h2`, which can determine all k hashes (Kirsch-Mitzenmacher optimization)'''
         full = self.hash_func(s.encode()).hexdigest()
 
         #Splits the SHA512 in half

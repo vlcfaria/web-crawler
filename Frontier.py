@@ -6,7 +6,14 @@ from PolicyManager import PolicyManager
 import threading
 
 class Frontier:
-    """Mercator style URL frontier."""
+    '''
+    Class representing a mercator style URL frontier.
+    
+    Since no priorization is needed, only one Front Queue is used, and the number of Back Queues is proportional to `num_workers`.
+    This structure also fires a daemon thread, responsible for managing the front/back queues and the heap when needed.
+
+    For more details about the mercator style URL frontier: `https://nlp.stanford.edu/IR-book/html/htmledition/the-url-frontier-1.html`
+    '''
     def __init__(self, policies: PolicyManager, num_workers, starting, filter_size, filter_error=.01):
         self.front = Queue() #Front is a simple queue, no prioritization yet
         for url in starting:
@@ -35,7 +42,7 @@ class Frontier:
         self.scheduler.start()
 
     def get(self, fetch_func):
-        "Grabs an URL from the frontier, calls `fetch_func`, handles structures and returns original `fetch_func` returned value"
+        '''Grabs an URL from the frontier, calls `fetch_func`, handles structures and returns original `fetch_func` returned value'''
         
         #Nothing on heap means: nothing on back queues OR less back queues filled than threads (usually at start)
         try:
@@ -43,16 +50,15 @@ class Frontier:
         except Empty:
             return None
 
-        try:
+        try: #Got value from heap, try extracting from back queue
             url = self.back[back_idx].get_nowait()
-        except Empty: #Warn scheduler that this is empty
+        except Empty: #Warn scheduler that this MIGHT be empty -> scheduler can be putting values here as we speak
             with self.hinted_empty_lock:
                 self.hinted_empty.add(back_idx)
             self.has_empty.set()
-
             return None
 
-        #Enforce politeness. Should only realistically happen at beggining (few domains)
+        #Enforce politeness.
         now = time.time()
         if now < allowed_time:
             time.sleep(allowed_time - now)
@@ -60,13 +66,13 @@ class Frontier:
         #Fetch!
         ans = fetch_func(url)
 
-        #Re-add. If back queue is empty, it will be caught in the above exception
+        #Re-add. If back queue is empty, it will be caught in an exception above
         self.heap.put_nowait((time.time() + self.policies.get_delay(url), back_idx))
 
         return ans
 
     def put(self, url: str) -> None:
-        "Takes in an url to be put into frontier, if not yet seen."
+        '''Takes in an url, which is to be put into frontier, if not yet seen.'''
 
         with self.visited_lock:
             #Not seen before
@@ -79,12 +85,19 @@ class Frontier:
         self.front.put(url)
 
     def _scheduler_loop(self) -> None:
-        "Manages scheduling of back queues and front queues, handling required structures."
+        '''
+        Manages scheduling of back queues and front queues, handling required structures. 
+        Avoids busy wait only when all back queues are filled.
+
+        Also responsible for refilling empty back queues hinted by the workers, and re-adding "lost" back queues back into the heap.
+
+        This function should not be called by multiple threads, or by an external object.
+        '''
 
         while(True):
             self.has_empty.clear()
 
-            with self.hinted_empty_lock:
+            with self.hinted_empty_lock: #Check queues hinted as empty
                 while self.hinted_empty:
                     idx = self.hinted_empty.pop()
                     if self.back[idx].qsize() == 0: #Really is empty
@@ -94,7 +107,7 @@ class Frontier:
                         del self.domain_map[idx] #idx -> domain
                         del self.domain_map[domain] #domain -> idx
             
-                    else:
+                    else: #False alarm, readd into heap
                         delay = self.policies.get_delay(self.domain_map[idx])
                         self.heap.put((time.time()+delay, idx))
             
@@ -131,7 +144,6 @@ class Frontier:
                 time.sleep(.1)
             else:
                 self.has_empty.wait()
-
 
     def _url_to_domain(self, url: str) -> str:
         'Gets the domain from an URL'
