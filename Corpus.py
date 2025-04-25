@@ -44,7 +44,8 @@ class Corpus:
             
             #Create record
             headers_list = resp.raw.headers.items()
-            http_headers = StatusAndHeaders('200 OK', headers_list, protocol='HTTP/1.0')
+            protocol = getattr(resp.raw, 'version_string', 'HTTP/1.1')
+            http_headers = StatusAndHeaders(f"{resp.status_code} {resp.reason}", headers_list, protocol=protocol)
 
             #warcio expects a stream, so convert content to stream
             record = self.writer.create_warc_record(url, 'response',

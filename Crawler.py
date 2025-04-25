@@ -98,6 +98,7 @@ class Crawler:
         #Fetch head to see if this is a text/html
         try:
             head = self.sessions[tid].head(url, stream=False, timeout=5, allow_redirects=False, headers=self.headers)
+            head.raise_for_status()
         except: #Too much can go wrong...
             return None
         
