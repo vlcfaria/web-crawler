@@ -189,4 +189,4 @@ class Crawler:
 
         obj = {'URL': url, 'Title': title,
                'Text': text, 'Timestamp': int(time.time())}
-        print(json.dumps(obj, indent=1))
+        print(json.dumps(obj, indent=1, ensure_ascii=False))
